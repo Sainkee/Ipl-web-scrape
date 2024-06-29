@@ -1,58 +1,98 @@
 import puppeteer from "puppeteer";
-import fs from "fs/promises"; // Using fs/promises for async file operations
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import fs from "fs/promises";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
 
 (async () => {
   const browser = await puppeteer.launch();
   const page = await browser.newPage();
 
   try {
-    // Navigate to the IPL stats page
     await page.goto("https://www.iplt20.com/stats/");
-
-    // Set screen size (optional)
     await page.setViewport({ width: 1080, height: 1024 });
 
-    // Wait for the "View All" button to load
-    const viewAllButtonSelector = "a[ng-click='showAllBattingStatsList()']";
-    await page.waitForSelector(viewAllButtonSelector);
+    // Function to scrape data for a single season and stat category
+    const scrapeSeasonData = async (season, statCategory) => {
+      // Select the season filter element
+      await page.waitForSelector(".cSBListItems.seasonFilterItems");
+      await page.evaluate((season) => {
+        const seasonElement = Array.from(
+          document.querySelectorAll(".cSBListItems.seasonFilterItems")
+        ).find((el) => el.getAttribute("data-val") === season);
+        if (seasonElement) {
+          seasonElement.click();
+        }
+      }, season);
 
-    // Click the "View All" button to load all batting stats
-    await page.evaluate((selector) => {
-      document.querySelector(selector).click();
-    }, viewAllButtonSelector);
+      // Wait for the statistic category button to load and click it
+      await page.waitForSelector(".cSBListItemsFilter", { timeout: 60000 });
+      await page.evaluate((statCategory) => {
+        const statCategoryElement = Array.from(
+          document.querySelectorAll(".cSBListItems.batters.ng-binding.ng-scope")
+        ).find((el) => el.innerText.trim().includes(statCategory));
+        if (statCategoryElement) {
+          statCategoryElement.click();
+        }
+      }, statCategory);
 
-    // Wait for the table rows to load after clicking "View All"
-    await page.waitForSelector(".st-table.statsTable > tbody > tr");
+      // Wait for the table rows to load after clicking the category
+      await page.waitForSelector(".statsTable > tbody > tr");
 
-    // Extract data from the table
-    const data = await page.evaluate(() => {
-      const rows = document.querySelectorAll(
-        ".st-table.statsTable > tbody > tr"
-      );
-      const stats = [];
-      rows.forEach((row) => {
-        const cols = row.querySelectorAll("td");
-        const playerStat = {
-          position: cols[0]?.innerText.trim(),
-          player: cols[1]?.innerText.trim(),
-          runs: cols[2]?.innerText.trim(),
-          fours: cols[3]?.innerText.trim(),
-          sixes: cols[4]?.innerText.trim(),
-          centuries: cols[5]?.innerText.trim(),
-          fifties: cols[6]?.innerText.trim(),
-        };
-        stats.push(playerStat);
+      // Extract data from the table
+      const stats = await page.evaluate(() => {
+        const rows = document.querySelectorAll(".statsTable > tbody > tr");
+        const stats = [];
+        rows.forEach((row, index) => {
+          if (index < 10) {
+            const cols = row.querySelectorAll("td");
+            const playerStat = {
+              position: cols[0]?.innerText.trim(),
+              player: cols[1]?.innerText.trim(),
+              runs: cols[5]?.innerText.trim(),
+              fours: cols[12]?.innerText.trim(),
+              sixes: cols[13]?.innerText.trim(),
+              centuries: cols[10]?.innerText.trim(),
+              fifties: cols[11]?.innerText.trim(),
+            };
+            stats.push(playerStat);
+          }
+        });
+        return stats;
       });
-      return stats;
-    });
+
+      return { season, statCategory, stats };
+    };
+
+    const allSeasonsData = [];
+
+    // Define the last five seasons and stat categories
+    const seasons = ["2024", "2023", "2022", "2021", "2019"];
+    const statCategories = [
+      "Most Fours ",
+      "Most Sixes ",
+      "Orange Cap",
+      "Most Centuries",
+      "Most Fifties",
+    ];
+
+    // Loop through each season and each stat category and scrape data
+    for (const season of seasons) {
+      for (const statCategory of statCategories) {
+        console.log(
+          `Scraping data for season: ${season}, category: ${statCategory}`
+        );
+        const seasonData = await scrapeSeasonData(season, statCategory);
+        allSeasonsData.push(seasonData);
+      }
+    }
+
+    // Resolve the current directory path
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
+
     // Write data to a JSON file
     const filePath = `${__dirname}/data.json`;
-    console.log(filePath);
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+    await fs.writeFile(filePath, JSON.stringify(allSeasonsData, null, 2));
     console.log(`Data successfully written to ${filePath}`);
   } catch (error) {
     console.error("Error during scraping:", error);
