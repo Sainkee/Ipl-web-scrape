@@ -38,7 +38,10 @@ import { dirname } from "path";
 
         await delay(5000);
 
-        await page.waitForSelector(".cSBListItems.batters.ng-binding.ng-scope");
+        await page.waitForSelector(
+          ".cSBListItems.batters.ng-binding.ng-scope",
+          { timeout: 60000 }
+        );
         console.log("Stat category filter found");
 
         const statCategoryClicked = await page.evaluate((statCategory) => {
@@ -143,6 +146,7 @@ import { dirname } from "path";
   } catch (error) {
     console.error("Error during scraping:", error);
   } finally {
-    await browser.close();
+    if (page) await page.close();
+    if (browser) await browser.close();
   }
 })();
